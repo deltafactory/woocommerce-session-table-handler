@@ -1,9 +1,21 @@
 <?php
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit; // Exit if accessed directly
+}
+
 /**
  * Handle data for the current customers session.
  * Implements the WC_Session abstract class
  *
+ * Based on WooCommerce's WC_Session_Handler which is in-turn partly based on WP SESSION by Eric Mann.
+ * Those implementations used the wp_options table to store sessions.
+ * This relocates data storage to a dedicated table to avoid bloating and frequent invalidation of the WP options cache.
+ *
+ * @class 		DF_WC_Session_Handler
+ * @version		1.1.0
+ * @author 		Jeff Brand
+ * @author 		WooThemes
  */
 class DF_WC_Session_Handler extends WC_Session {
 
@@ -22,6 +34,22 @@ class DF_WC_Session_Handler extends WC_Session {
 	/** Table name for custom session records **/
 	private $_table;
 
+	/** Cache group **/
+	private $_cachegroup = 'df_wc_sessions';
+
+	/** Override to disable use of object cache */
+	private $_usecache = true;
+
+	/** Check the property to change and don't change/dirty the session if there's no real effect on the session. **/
+	public $always_update = false; //default = false
+
+	//@todo: Deprecate this in the future based on https://github.com/woothemes/woocommerce/issues/6846
+	public function set( $key, $value ) {
+		if ( $this->always_update || $value !== $this->get( $key ) ) {
+			parent::set( $key, $value );
+		}
+	}
+
 	/**
 	 * Constructor for the session class.
 	 *
@@ -39,20 +67,19 @@ class DF_WC_Session_Handler extends WC_Session {
 			$this->_session_expiring   = $cookie[2];
 			$this->_has_cookie         = true;
 
-			$this->_data = $this->get_session_data();
-
 			// Update session if its close to expiring
-			if ( !empty( $this->_data ) && time() > $this->_session_expiring ) {
+			if ( time() > $this->_session_expiring ) {
 				$this->set_session_expiration();
 				$this->update_expiration( $this->_customer_id, $this->_session_expiration );
+				// This doesn't update the cache's expiration.
 			}
 
 		} else {
 			$this->set_session_expiration();
 			$this->_customer_id = $this->generate_customer_id();
-			$this->_data = array();
 		}
 
+		$this->_data = $this->get_session_data();
 
     	// Actions
     	add_action( 'woocommerce_set_cart_cookies', array( $this, 'set_customer_session_cookie' ), 10 );
@@ -156,46 +183,58 @@ class DF_WC_Session_Handler extends WC_Session {
 	 */
 	public function get_session_data() {
 		global $wpdb;
-		//@todo: Caching?
 
-		$val = $wpdb->get_var( $wpdb->prepare( "SELECT data FROM $this->_table WHERE customer_id=%s LIMIT 1", $this->_customer_id ) );
+		$val = $this->_usecache ? wp_cache_get( $this->_customer_id, $this->_cachegroup ) : false;
+
+		if ( ! $val ) {
+			$val = $wpdb->get_var( $wpdb->prepare( "SELECT data FROM $this->_table WHERE customer_id=%s LIMIT 1", $this->_customer_id ) );
+		}
+
 		return $val ? (array) @unserialize( $val ) : array();
 	}
 
-    /**
-     * save_data function.
-     *
-     * @access public
-     * @return void
-     */
-    public function save_data() {
-    	global $wpdb;
+	/**
+	 * save_data function.
+	 *
+	 * @access public
+	 * @return void
+	 */
+	public function save_data() {
+		global $wpdb;
 
-    	// Dirty if something changed - prevents saving nothing new
-    	if ( $this->_dirty && $this->has_session() ) {
-    		$data = array(
-    			'customer_id' => $this->_customer_id,
-    			'expiration'  => $this->_session_expiration,
-    			'data'        => serialize( $this->_data )
-    		);
+		// Dirty if something changed - prevents saving nothing new
+		if ( $this->_dirty && $this->has_session() ) {
+			$data = array(
+				'customer_id' => $this->_customer_id,
+				'expiration'  => $this->_session_expiration,
+				'data'        => serialize( $this->_data )
+			);
 
-    		$wpdb->replace( $this->_table, $data );
-	    }
-    }
+			if ( $this->_usecache ) {
+				wp_cache_delete( $this->_customer_id, $this->_cachegroup );
+			}
 
-    /**
-     * Destroy all session data
-     */
-    public function destroy_session() {
+			$wpdb->replace( $this->_table, $data );
+		}
+	}
+
+	/**
+	 * Destroy all session data
+	 */
+	public function destroy_session() {
 		// Clear cookie
 		wc_setcookie( $this->_cookie, '', time() - YEAR_IN_SECONDS, apply_filters( 'wc_session_use_secure_cookie', false ) );
 
 		global $wpdb;
-
 		$wpdb->query( $wpdb->prepare( "DELETE FROM $this->_table WHERE customer_id=%s", $this->_customer_id ) );
 
 		// Clear cart
 		wc_empty_cart();
+
+		// Clear cache
+		if ( $this->_usecache ) {
+			wp_cache_delete( $this->_customer_id, $this->_cachegroup );
+		}
 
 		// Clear data
 		$this->_data        = array();
@@ -203,7 +242,7 @@ class DF_WC_Session_Handler extends WC_Session {
 		$this->_customer_id = $this->generate_customer_id();
 	}
 
-    /**
+	/**
 	 * cleanup_sessions function.
 	 *
 	 * @access public
@@ -213,20 +252,27 @@ class DF_WC_Session_Handler extends WC_Session {
 		global $wpdb;
 
 		if ( ! defined( 'WP_SETUP_CONFIG' ) && ! defined( 'WP_INSTALLING' ) ) {
-			$now = time();
-			$wpdb->query( $wpdb->prepare( "DELETE FROM $this->_table WHERE expiration < %d", $now ) );
+			$wpdb->query( $wpdb->prepare( "DELETE FROM $this->_table WHERE expiration < %d", time() ) );
+
+			if ( $this->_usecache ) {
+				wp_cache_flush();
+			}
 		}
 	}
 
 	public function destroy_all_sessions() {
 		global $wpdb;
 		$wpdb->query( "TRUNCATE TABLE $this->_table" );
+
+		if ( $this->_usecache ) {
+			wp_cache_flush();
+		}
+
 		return true;
 	}
 
 	public function update_expiration( $customer_id, $expiration ) {
 		global $wpdb;
-		error_log( 'Updating expiration date:' );
 		$wpdb->update( $this->_table, array( 'expiration' => (int) $expiration ), compact( 'customer_id' ) );
 	}
 
