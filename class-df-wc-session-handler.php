@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * This relocates data storage to a dedicated table to avoid bloating and frequent invalidation of the WP options cache.
  *
  * @class 		DF_WC_Session_Handler
- * @version		1.1.0
+ * @version		1.1.1
  * @author 		Jeff Brand
  * @author 		WooThemes
  */
@@ -37,15 +37,12 @@ class DF_WC_Session_Handler extends WC_Session {
 	/** Cache group **/
 	private $_cachegroup = 'df_wc_sessions';
 
-	/** Override to disable use of object cache */
-	private $_usecache = true;
-
-	/** Check the property to change and don't change/dirty the session if there's no real effect on the session. **/
-	public $always_update = false; //default = false
+	/** Override use of cache API */
+	private $_force_cache = null;
 
 	//@todo: Deprecate this in the future based on https://github.com/woothemes/woocommerce/issues/6846
 	public function set( $key, $value ) {
-		if ( $this->always_update || $value !== $this->get( $key ) ) {
+		if ( $value !== $this->get( $key ) ) {
 			parent::set( $key, $value );
 		}
 	}
@@ -184,7 +181,7 @@ class DF_WC_Session_Handler extends WC_Session {
 	public function get_session_data() {
 		global $wpdb;
 
-		$val = $this->_usecache ? wp_cache_get( $this->_customer_id, $this->_cachegroup ) : false;
+		$val = $this->use_cache() ? wp_cache_get( $this->_customer_id, $this->_cachegroup ) : false;
 
 		if ( ! $val ) {
 			$val = $wpdb->get_var( $wpdb->prepare( "SELECT data FROM $this->_table WHERE customer_id=%s LIMIT 1", $this->_customer_id ) );
@@ -210,7 +207,7 @@ class DF_WC_Session_Handler extends WC_Session {
 				'data'        => serialize( $this->_data )
 			);
 
-			if ( $this->_usecache ) {
+			if ( $this->use_cache() ) {
 				wp_cache_delete( $this->_customer_id, $this->_cachegroup );
 			}
 
@@ -232,7 +229,7 @@ class DF_WC_Session_Handler extends WC_Session {
 		wc_empty_cart();
 
 		// Clear cache
-		if ( $this->_usecache ) {
+		if ( $this->use_cache() ) {
 			wp_cache_delete( $this->_customer_id, $this->_cachegroup );
 		}
 
@@ -254,7 +251,7 @@ class DF_WC_Session_Handler extends WC_Session {
 		if ( ! defined( 'WP_SETUP_CONFIG' ) && ! defined( 'WP_INSTALLING' ) ) {
 			$wpdb->query( $wpdb->prepare( "DELETE FROM $this->_table WHERE expiration < %d", time() ) );
 
-			if ( $this->_usecache ) {
+			if ( $this->use_cache() ) {
 				wp_cache_flush();
 			}
 		}
@@ -264,7 +261,7 @@ class DF_WC_Session_Handler extends WC_Session {
 		global $wpdb;
 		$wpdb->query( "TRUNCATE TABLE $this->_table" );
 
-		if ( $this->_usecache ) {
+		if ( $this->use_cache() ) {
 			wp_cache_flush();
 		}
 
@@ -276,4 +273,17 @@ class DF_WC_Session_Handler extends WC_Session {
 		$wpdb->update( $this->_table, array( 'expiration' => (int) $expiration ), compact( 'customer_id' ) );
 	}
 
+	/**
+	 * Force use of cache
+	 * null: use external cache when present (default)
+	 * true: always use cache
+	 * false: never use cache
+	 */
+	public function force_cache( $force ) {
+		$this->_force_cache = $force;
+	}
+
+	private function use_cache() {
+		return ( null !== $this->_force_cache ) ? $this->_force_cache : wp_using_ext_object_cache();
+	}
 }
