@@ -85,7 +85,7 @@ class DF_Session_Loader {
 
 		$sql = "SELECT SUM( customer_id REGEXP '^[0-9]+$' ) AS user, SUM(1) AS total FROM $table";
 		if ( $expired ) {
-			$sql .= $wpdb->escape( ' WHERE expiration >= %d', time() );
+			$sql .= $wpdb->escape( ' WHERE expiration < %d', time() );
 		}
 
 		$count = array_merge( array( 'user' => 0, 'total' => 0 ), (array) $wpdb->get_row( $sql, ARRAY_A ) );
