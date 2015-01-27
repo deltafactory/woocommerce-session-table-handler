@@ -58,6 +58,10 @@ class DF_WC_Session_Handler extends WC_Session {
 		$this->_table = $wpdb->prefix . 'df_wc_sessions';
 		$this->_cookie = 'wp_woocommerce_session_' . COOKIEHASH;
 
+		if ( defined( 'DOING_CRON' ) && DOING_CRON ) {
+			return;
+		}
+
 		if ( $cookie = $this->get_session_cookie() ) {
 			$this->_customer_id        = $cookie[0];
 			$this->_session_expiration = $cookie[1];
@@ -181,10 +185,19 @@ class DF_WC_Session_Handler extends WC_Session {
 	public function get_session_data() {
 		global $wpdb;
 
+		if ( ! $this->has_session() ) {
+			return array();
+		}
+
 		$val = $this->use_cache() ? wp_cache_get( $this->_customer_id, $this->_cachegroup ) : false;
 
 		if ( ! $val ) {
 			$val = $wpdb->get_var( $wpdb->prepare( "SELECT data FROM $this->_table WHERE customer_id=%s LIMIT 1", $this->_customer_id ) );
+
+			if ( $val && $this->use_cache() ) {
+				$expire_in = $this->_session_expiration - time();
+				wp_cache_set( $this->_customer_id, $val, $this->_cachegroup, $expire_in );
+			}
 		}
 
 		return $val ? (array) @unserialize( $val ) : array();
@@ -284,6 +297,19 @@ class DF_WC_Session_Handler extends WC_Session {
 	}
 
 	private function use_cache() {
-		return ( null !== $this->_force_cache ) ? $this->_force_cache : wp_using_ext_object_cache();
+		$use_cache = ( null !== $this->_force_cache ) ? $this->_force_cache : wp_using_ext_object_cache();
+		return $use_cache;
+	}
+
+	private function log( $message, $with_backtrace = false ) {
+		if ( !WP_DEBUG ) {
+			return;
+		}
+
+		error_log( $message );
+
+		if ( $with_backtrace ) {
+			error_log( wp_debug_backtrace_summary() );
+		}
 	}
 }
