@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * This relocates data storage to a dedicated table to avoid bloating and frequent invalidation of the WP options cache.
  *
  * @class 		DF_WC_Session_Handler
- * @version		1.1.1
+ * @version		1.2.0
  * @author 		Jeff Brand
  * @author 		WooThemes
  */
@@ -173,9 +173,6 @@ class DF_WC_Session_Handler extends WC_Session {
 		return array( $customer_id, $session_expiration, $session_expiring, $cookie_hash );
 	}
 
-
-/////////////////////////////////////////////////////////////////////////
-
 	/**
 	 * get_session_data function.
 	 *
@@ -301,15 +298,4 @@ class DF_WC_Session_Handler extends WC_Session {
 		return $use_cache;
 	}
 
-	private function log( $message, $with_backtrace = false ) {
-		if ( !WP_DEBUG ) {
-			return;
-		}
-
-		error_log( $message );
-
-		if ( $with_backtrace ) {
-			error_log( wp_debug_backtrace_summary() );
-		}
-	}
 }
