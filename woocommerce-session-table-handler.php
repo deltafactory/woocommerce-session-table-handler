@@ -2,7 +2,7 @@
 /*
 Plugin Name: WooCommerce Table-Based Sessions
 Description: Drop-in replacement to relocate WC Sessions from <code>wp_options</code> table to a dedicated table. This should improve option cache performance and simplify query code. Based on original WC_Session code from WooCommerce core.
-Version: 1.2.0
+Version: 1.2.1
 Author: Jeff Brand
 */
 

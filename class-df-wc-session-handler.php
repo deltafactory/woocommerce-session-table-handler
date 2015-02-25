@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * This relocates data storage to a dedicated table to avoid bloating and frequent invalidation of the WP options cache.
  *
  * @class 		DF_WC_Session_Handler
- * @version		1.2.0
+ * @version		1.2.1
  * @author 		Jeff Brand
  * @author 		WooThemes
  */
@@ -188,10 +188,15 @@ class DF_WC_Session_Handler extends WC_Session {
 
 		$val = $this->use_cache() ? wp_cache_get( $this->_customer_id, $this->_cachegroup ) : false;
 
-		if ( ! $val ) {
+		if ( false === $val ) {
 			$val = $wpdb->get_var( $wpdb->prepare( "SELECT data FROM $this->_table WHERE customer_id=%s LIMIT 1", $this->_customer_id ) );
 
-			if ( $val && $this->use_cache() ) {
+			// Populate cache with empty array to prevent DB query.
+			if ( $val === null ) {
+				$val = serialize( array() );
+			}
+
+			if ( $this->use_cache() ) {
 				$expire_in = $this->_session_expiration - time();
 				wp_cache_set( $this->_customer_id, $val, $this->_cachegroup, $expire_in );
 			}
